@@ -63,3 +63,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Release rebuild failed' }
 Нужны Node.js/npm, Rust toolchain для `x86_64-pc-windows-msvc`, Windows C++ Build Tools и WebView2 Runtime для запуска. Зависимости скачиваются при первой установке; архив не содержит готовые бинарные кэши.
 
 **Исправление упаковщика исходников:** проверка `package-lock.json` выполняется отдельным `scripts/VERIFY-NPM-LOCK.cjs` вместо `node -e` (совместимость с Windows PowerShell 5.1).
+
+## Лицензия исходного кода
+
+Авторский исходный код **TrayBin** распространяется на условиях **MIT License** (© 2026 TraurigerEngel). Полный текст: [LICENSE](LICENSE).
+
+Сторонние шрифты, изображения и библиотеки, если они присутствуют, сохраняют собственные лицензионные условия.
+
+**Примечание о релизах:** MIT добавлена в ветку `main` после публикации `v2.0.0`. Старый тег и проверенный Portable ZIP не изменялись; при просмотре исходников по старому тегу см. актуальный файл [LICENSE](https://github.com/TraurigerEngel/TrayBin/blob/main/LICENSE).
+
