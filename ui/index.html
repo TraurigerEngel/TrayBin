@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <meta name="color-scheme" content="dark" />
+  <title>TrayBin</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script src="./app.js" defer></script>
+</head>
+<body>
+<main class="app" id="app">
+  <header class="bar">
+    <div class="brand">
+      <span class="brand-symbol" aria-hidden="true">
+        <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5.5 8h17M10 5h8M7 8l1.1 15h11.8L21 8M12 12v7m4-7v7" stroke-linecap="round"/></svg>
+      </span>
+      <div><h1>TrayBin</h1><p>RECYCLE BIN MANAGER</p></div>
+    </div>
+    <div class="bar-right"><span class="status-dot" id="dot"></span><button id="hide" class="icon-button" aria-label="Скрыть">×</button></div>
+  </header>
+
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-halo" aria-hidden="true"></div>
+    <div class="hero-top"><span class="hero-kicker">СОСТОЯНИЕ КОРЗИНЫ</span><span class="subtle" id="checked">Проверка…</span></div>
+    <div class="hero-main">
+      <span class="hero-symbol" aria-hidden="true">
+        <svg viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17h32M22 12h12M16 17l2 30h20l2-30M24 25v14m8-14v14" /></svg>
+      </span>
+      <div class="hero-data"><div id="hero-title" class="state-label">Проверка состояния</div><div class="big-count"><span id="count">—</span> <span id="count-unit">объектов</span></div><div id="used" class="subtle">Получение данных Windows…</div></div>
+    </div>
+    <div class="capacity-line"><span id="capacity-caption">Заполненность корзины</span><span id="percent">—</span></div>
+    <div class="track"><div class="fill" id="fill"></div></div>
+  </section>
+
+  <section class="tiny-cards" aria-label="Статистика">
+    <div class="tiny-card"><span>ЗАНЯТО</span><strong id="used-value">—</strong></div>
+    <div class="tiny-card"><span>ЛИМИТ WINDOWS</span><strong id="limit-value">—</strong></div>
+  </section>
+
+  <section class="actions" aria-label="Действия">
+    <button id="open" class="action primary"><span class="action-glyph">↗</span><span>Открыть корзину</span><span class="chevron">›</span></button>
+    <button id="empty" class="action clear" disabled><span class="action-glyph">✧</span><span>Очистить корзину</span><span class="chevron">›</span></button>
+  </section>
+
+  <section class="footer-actions">
+    <button id="startup" class="setting" type="button"><span class="setting-symbol">◈</span><span class="setting-copy"><strong>Автозапуск</strong><small id="startup-status">Проверка…</small></span><span class="toggle" id="switch" aria-hidden="true"><i></i></span></button>
+    <div class="bottom-line">
+      <button class="details-trigger" id="details" aria-expanded="false">Информация о дисках <span id="details-arrow">⌄</span></button>
+      <button class="quit" id="quit">Выход из TrayBin <span>↗</span></button>
+    </div>
+  </section>
+  <section class="details" id="details-panel" hidden aria-label="Данные о дисках"><div id="volumes">Нет данных</div></section>
+  <div id="toast" role="status" aria-live="polite"></div>
+</main>
+</body>
+</html>

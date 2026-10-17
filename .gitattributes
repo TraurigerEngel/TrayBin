@@ -1,0 +1,7 @@
+# The source integrity manifest expects LF line endings on all source files.
+# Avoid Git for Windows automatic CRLF conversion during checkout.
+* text=auto eol=lf
+# The archive-generated checksum file has original CRLF bytes; preserve them.
+SOURCE_ARCHIVE_SHA256.txt -text
+# Binary icon assets
+*.ico -text

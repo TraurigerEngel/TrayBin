@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Local-only TrayBin panel",
+  "windows": ["panel"],
+  "permissions": ["core:default"]
+}

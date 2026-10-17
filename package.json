@@ -1,0 +1,17 @@
+{
+  "name": "traybin-tauri",
+  "private": true,
+  "version": "2.0.0",
+  "description": "TrayBin v2.0 - compact Windows recycle bin companion",
+  "scripts": {
+    "dev": "tauri dev",
+    "build:dev": "tauri build --debug --no-bundle",
+    "build:release": "tauri build --no-bundle",
+    "test:ui": "node --test tests/panel.test.cjs tests/source-contract.test.cjs",
+    "verify:static": "node --check ui/app.js && npm run test:ui",
+    "verify:release": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\VERIFY-RELEASE.ps1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.0"
+  }
+}
