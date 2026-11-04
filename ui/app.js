@@ -1,64 +1,112 @@
 'use strict';
-const $ = (id) => document.getElementById(id);
+const $ = id => document.getElementById(id);
 const tauri = window.__TAURI__;
 const invoke = tauri?.core?.invoke;
-let busy = false;
-let snap = null;
-let toastTimer;
 const number = new Intl.NumberFormat('ru-RU');
+let busy = false;
+let toastTimer;
+let lastVolumesKey = null;
+
 function formatSize(bytes) {
   if (bytes == null || !Number.isFinite(bytes)) return '—';
-  let n = Math.max(0, bytes); let u = 0;
-  while (n >= 1024 && u < 4) { n /= 1024; u++; }
-  return `${n.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ${['Б','КБ','МБ','ГБ','ТБ'][u]}`;
+  let size = Math.max(0, bytes);
+  let unit = 0;
+  while (size >= 1024 && unit < 4) { size /= 1024; unit++; }
+  return `${size.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ${['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'][unit]}`;
 }
-function word(n) {
-  const m = n % 100; const l = n % 10;
-  return m >= 11 && m <= 14 ? 'объектов' : l === 1 ? 'объект' : l >= 2 && l <= 4 ? 'объекта' : 'объектов';
+function word(value) {
+  const a = value % 100;
+  const b = value % 10;
+  return a >= 11 && a <= 14 ? 'объектов' : b === 1 ? 'объект' : b >= 2 && b <= 4 ? 'объекта' : 'объектов';
 }
-function toast(text) {
+function toast(message) {
   const node = $('toast');
-  node.textContent = String(text); node.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 3700);
+  node.textContent = String(message);
+  node.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove('show'), 3700);
 }
-function render(s) {
-  if (!s) return; snap = s;
-  const available = s.available;
-  $('dot').className = `status-dot ${available ? 'online' : 'error'}`;
-  $('dot').title = available ? 'Система Windows доступна' : 'Не удалось прочитать корзину';
-  $('checked').textContent = new Date(s.checked_at * 1000).toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-  $('checked').title = 'Время последней полной проверки данных';
-  $('hero-title').textContent = s.empty_busy ? 'Идёт очистка…' : !available ? 'Состояние недоступно' : s.items ? 'Обнаружены файлы' : 'Корзина пуста';
-  $('count').textContent = available ? number.format(s.items) : '—';
-  $('count-unit').textContent = available ? word(s.items) : '';
-  $('used').textContent = !available ? 'Не удалось получить данные Windows' : s.items === 0 ? 'Всё чисто ✧' : 'Ожидают удаления';
-  $('used-value').textContent = available ? formatSize(s.size) : '—';
-  const reliable = available && s.capacity_complete && s.capacity > 0;
-  $('limit-value').textContent = reliable ? formatSize(s.capacity) : 'Не определён';
-  $('capacity-caption').textContent = reliable ? 'Заполненность корзины' : 'Точный лимит недоступен';
-  const pct = reliable ? Math.min(100, Math.max(0, s.size / s.capacity * 100)) : null;
-  $('percent').textContent = pct == null ? '—' : `${pct.toLocaleString('ru-RU', {maximumFractionDigits:1})}%`;
-  $('fill').style.width = `${pct ?? 0}%`;
-  $('empty').disabled = !available || s.items === 0 || s.empty_busy || busy;
-  $('empty').setAttribute('aria-busy', String(s.empty_busy || busy));
-  $('startup-status').textContent = s.startup_status;
-  $('switch').classList.toggle('on', s.startup);
-  $('startup').setAttribute('aria-pressed', String(s.startup));
-  $('volumes').replaceChildren();
-  if (!s.volumes || s.volumes.length === 0) $('volumes').textContent = 'Windows не вернула сведения о томах.';
-  else for (const v of s.volumes) {
-    const row = document.createElement('div'); row.className = 'drive';
-    const title = document.createElement('span'); title.className = 'drive-title'; title.textContent = v.name;
-    const note = document.createElement('span'); note.className = 'drive-note';
-    note.textContent = `${formatSize(v.used)} / ${v.limit == null ? 'лимит неизвестен' : formatSize(v.limit)}${v.note ? ' · ' + v.note : ''}`;
-    row.append(title, note); $('volumes').append(row);
+function renderVolumes(volumes) {
+  const key = JSON.stringify(volumes ?? []);
+  if (key === lastVolumesKey) return;
+  lastVolumesKey = key;
+  const container = $('volumes');
+  container.replaceChildren();
+  if (!volumes?.length) {
+    container.textContent = 'Windows не вернула сведения о дисках.';
+    return;
+  }
+  for (const volume of volumes) {
+    const row = document.createElement('div');
+    row.className = 'drive';
+    row.setAttribute('role', 'listitem');
+    const name = document.createElement('span');
+    name.className = 'drive-title';
+    name.textContent = volume.name;
+    const note = document.createElement('span');
+    note.className = 'drive-note';
+    note.textContent = `${formatSize(volume.used)} / ${volume.limit == null ? 'лимит неизвестен' : formatSize(volume.limit)}${volume.note ? ` · ${volume.note}` : ''}`;
+    row.append(name, note);
+    container.append(row);
   }
 }
-async function reload() {
-  try { render(await invoke('get_snapshot')); }
-  catch(e) { toast(`Не удалось прочитать корзину: ${e}`); }
+function render(snapshot) {
+  if (!snapshot) return;
+  const available = Boolean(snapshot.available);
+  const items = available ? snapshot.items : 0;
+  const status = $('dot');
+  status.className = `status-dot ${available ? 'online' : 'error'}`;
+  status.title = available ? 'Данные Windows доступны' : 'Не удалось прочитать корзину';
+  $('checked').textContent = Number.isFinite(snapshot.checked_at) && snapshot.checked_at > 0
+    ? new Date(snapshot.checked_at * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : 'Нет данных';
+  $('checked').title = 'Последняя проверка';
+  $('hero-title').textContent = snapshot.empty_busy ? 'Очистка корзины…' : !available ? 'Состояние недоступно' : items ? 'В корзине' : 'Корзина пуста';
+  $('count').textContent = available ? number.format(items) : '—';
+  $('count-unit').textContent = available && items ? word(items) : '';
+  $('used').textContent = !available ? 'Не удалось получить данные Windows' : items === 0 ? 'Ничего лишнего' : `Занято ${formatSize(snapshot.size)}`;
+
+  $('used-value').textContent = available ? formatSize(snapshot.size) : '—';
+  // "capacity_complete" is stricter than "at least one explicit disk limit exists":
+  // the native scan also marks it false on missing disk data or a Shell count mismatch.
+  // Show known limits honestly even when a complete aggregate cannot be established.
+  const knownCapacity = available && Number.isFinite(snapshot.capacity) && snapshot.capacity > 0;
+  const reliable = knownCapacity && snapshot.capacity_complete === true;
+  const partial = knownCapacity && !reliable;
+  $('limit-label').textContent = partial ? 'Известный лимит' : 'Лимит Windows';
+  $('limit-value').textContent = reliable ? formatSize(snapshot.capacity)
+    : partial ? `≥ ${formatSize(snapshot.capacity)}` : (available ? 'Не определён' : '—');
+  $('limit-value').title = partial ? 'Нижняя граница: общий лимит по всем дискам не подтверждён' : '';
+  $('capacity-caption').textContent = reliable ? 'Заполненность'
+    : partial ? 'Общий лимит требует уточнения' : 'Точный лимит недоступен';
+  const percent = reliable ? Math.min(100, Math.max(0, snapshot.size / snapshot.capacity * 100)) : null;
+  const percentText = percent == null ? '—' : `${percent.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
+  $('percent').textContent = percentText;
+  $('fill').style.width = `${percent ?? 0}%`;
+  const track = $('track');
+  track.hidden = percent == null;
+  track.setAttribute('aria-valuetext', percent == null ? 'Точный лимит неизвестен' : percentText);
+  if (percent == null) track.removeAttribute('aria-valuenow');
+  else track.setAttribute('aria-valuenow', String(percent));
+
+  $('empty').disabled = !available || !items || snapshot.empty_busy || busy;
+  $('empty').setAttribute('aria-busy', String(snapshot.empty_busy || busy));
+  $('open').disabled = busy;
+  $('startup').disabled = busy;
+  $('startup-status').textContent = snapshot.startup_status;
+  $('switch').classList.toggle('on', Boolean(snapshot.startup));
+  $('startup').setAttribute('aria-pressed', String(Boolean(snapshot.startup)));
+  renderVolumes(snapshot.volumes);
 }
-async function operation(action, { hideBefore = false, hideAfter = false } = {}) {
+async function reload() {
+  if (!invoke) return;
+  try { render(await invoke('get_snapshot')); }
+  catch (error) {
+    render({ available: false, items: 0, capacity_complete: false, volumes: [], startup: false, startup_status: 'Недоступен' });
+    toast(`Не удалось получить данные: ${error}`);
+  }
+}
+async function operation(command, { hideBefore = false, hideAfter = false } = {}) {
   if (busy || !invoke) return;
   busy = true;
   $('open').disabled = true;
@@ -66,51 +114,46 @@ async function operation(action, { hideBefore = false, hideAfter = false } = {})
   $('empty').disabled = true;
   try {
     if (hideBefore) await invoke('hide_panel');
-    await invoke(action);
+    await invoke(command);
     if (hideAfter) await invoke('hide_panel');
-  } catch(e) {
-    if (!String(e).includes('отменена пользователем')) {
+  } catch (error) {
+    if (!String(error).includes('отменена пользователем')) {
       if (hideBefore) {
-        try { await invoke('show_panel_error'); } catch { /* Keep original error. */ }
+        try { await invoke('show_panel_error'); } catch { /* Preserve the original error. */ }
       }
-      toast(e);
+      toast(error);
     }
   } finally {
     busy = false;
-    $('open').disabled = false;
-    $('startup').disabled = false;
     await reload();
   }
 }
-function closeDetails() {
-  $('details-panel').hidden = true;
-  $('details').setAttribute('aria-expanded', 'false');
-  $('details-arrow').textContent = '⌄';
+function setDetails(open) {
+  $('home-view').hidden = open;
+  $('details-panel').hidden = !open;
+  $('details').textContent = open ? '← Назад' : 'Подробнее';
+  $('details').setAttribute('aria-expanded', String(open));
+  if (open) $('volumes').scrollTop = 0;
 }
+function closeDetails() { setDetails(false); }
 $('open').addEventListener('click', () => operation('open_bin', { hideAfter: true }));
-$('empty').addEventListener('click', () => {
-  // Hide our always-on-top panel before the native Windows confirmation appears.
-  operation('empty_bin', { hideBefore: true });
-});
+$('empty').addEventListener('click', () => operation('empty_bin', { hideBefore: true }));
 $('startup').addEventListener('click', () => operation('set_startup'));
 $('hide').addEventListener('click', () => { closeDetails(); invoke?.('hide_panel'); });
 $('quit').addEventListener('click', () => invoke?.('exit_app'));
-$('details').addEventListener('click', () => {
-  const hidden = !$('details-panel').hidden;
-  $('details-panel').hidden = hidden;
-  $('details').setAttribute('aria-expanded', String(!hidden));
-  $('details-arrow').textContent = hidden ? '⌄' : '⌃';
+$('details').addEventListener('click', () => setDetails($('details-panel').hidden));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { closeDetails(); invoke?.('hide_panel'); }
 });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeDetails(); invoke?.('hide_panel'); }
-});
+window.addEventListener?.('blur', closeDetails);
+
 if (invoke) {
   tauri.event.listen('traybin://snapshot', ({ payload }) => render(payload)).catch(console.error);
   tauri.event.listen('traybin://error', ({ payload }) => toast(payload)).catch(console.error);
   reload();
 } else {
   $('hero-title').textContent = 'Запуск вне Tauri';
-  $('used').textContent = 'Откройте приложение через npm run dev';
+  $('used').textContent = 'Запусти приложение через npm run dev';
   $('checked').textContent = 'Нет подключения';
-  $('open').disabled = true; $('startup').disabled = true; $('empty').disabled = true;
+  $('startup-status').textContent = 'Нет подключения';
 }

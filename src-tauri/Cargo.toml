@@ -1,7 +1,7 @@
 [package]
 name = "traybin"
-version = "2.0.0"
-description = "Windows tray recycle bin helper"
+version = "2.1.4"
+description = "Windows tray recycle bin helper - Minimal Details Fix"
 edition = "2021"
 
 [lib]

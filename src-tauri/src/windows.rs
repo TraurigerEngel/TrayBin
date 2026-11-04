@@ -77,7 +77,7 @@ fn enum_volumes() -> (Vec<Volume>, bool, u64, u64, u64) {
         let guid_path = unwiden(&buffer);
         if guid_path.is_empty() { complete = false; break; }
         let kind = unsafe { GetDriveTypeW(wide(&guid_path).as_ptr()) };
-        if kind == 2 || kind == 3 {
+        if kind == 3 {
             let mut mount_buf = vec![0u16; 4096];
             let mut needed = 0u32;
             let mut ok = unsafe { GetVolumePathNamesForVolumeNameW(

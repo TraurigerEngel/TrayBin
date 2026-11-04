@@ -1,4 +1,4 @@
-//! TrayBin v2 Preview — Windows-only system tray application.
+//! TrayBin v2.1.4 Lean Runtime Preview — Windows-native context menu, no WebView windows.
 #![cfg_attr(not(windows), allow(unused))]
 #[cfg(not(windows))]
 compile_error!("TrayBin uses Windows Shell APIs and must be built on Windows.");
@@ -15,14 +15,15 @@ mod app {
         time::{Duration, Instant},
     };
     use tauri::{
-        AppHandle, Emitter, Manager, PhysicalPosition, Position, RunEvent, WindowEvent,
+        AppHandle, Manager, RunEvent,
         image::Image,
+        menu::{Menu, MenuItem},
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     };
 
-    static EMPTYING: AtomicBool = AtomicBool::new(false);
     const POLL_INTERVAL: Duration = Duration::from_secs(5);
     const FULL_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+    static EMPTYING: AtomicBool = AtomicBool::new(false);
     const ICONS: [&[u8]; 5] = [
         include_bytes!("../icons/empty.ico"), include_bytes!("../icons/25.ico"),
         include_bytes!("../icons/50.ico"), include_bytes!("../icons/75.ico"),
@@ -32,8 +33,6 @@ mod app {
     #[derive(Default)]
     struct Router { sequence: u64, last_double: Option<Instant> }
 
-    // A blocking wait avoids waking the polling thread four times per second.
-    // The condition variable also lets shutdown interrupt the full 5s interval.
     #[derive(Default)]
     struct StopSignal {
         stopped: Mutex<bool>,
@@ -57,9 +56,23 @@ mod app {
         }
     }
 
+    // The poller compares only these three scalars. Keeping the full Snapshot
+    // would clone the per-volume Vec<String> every five seconds for no benefit.
+    #[derive(Clone, Copy)]
+    struct Counters {
+        available: bool,
+        items: u64,
+        size: u64,
+    }
+    impl From<&windows::Snapshot> for Counters {
+        fn from(snapshot: &windows::Snapshot) -> Self {
+            Self { available: snapshot.available, items: snapshot.items, size: snapshot.size }
+        }
+    }
+
     #[derive(Default)]
     struct Cache {
-        snapshot: Mutex<Option<windows::Snapshot>>,
+        counters: Mutex<Option<Counters>>,
         last_full: Mutex<Option<Instant>>,
         icon_index: Mutex<Option<usize>>,
         tooltip: Mutex<Option<String>>,
@@ -73,16 +86,16 @@ mod app {
         let ratio = snapshot.size as f64 / snapshot.capacity as f64;
         if ratio <= 0.25 { 1 } else if ratio <= 0.50 { 2 } else if ratio <= 0.75 { 3 } else { 4 }
     }
-    fn tooltip(s: &windows::Snapshot) -> String {
-        if s.empty_busy { return "TrayBin · Очистка корзины…".into(); }
-        if !s.available { return "TrayBin · Не удалось прочитать корзину".into(); }
-        format!("TrayBin · {} объектов · {}", s.items, size_text(s.size))
-    }
     fn size_text(size: u64) -> String {
         let mut bytes = size as f64;
         let mut unit = 0;
         while bytes >= 1024.0 && unit < 4 { bytes /= 1024.0; unit += 1; }
         format!("{:.1} {}", bytes, ["Б", "КБ", "МБ", "ГБ", "ТБ"][unit])
+    }
+    fn tooltip(s: &windows::Snapshot) -> String {
+        if s.empty_busy { return "TrayBin · Очистка корзины…".into(); }
+        if !s.available { return "TrayBin · Не удалось прочитать корзину".into(); }
+        format!("TrayBin · {} объектов · {}", s.items, size_text(s.size))
     }
 
     fn update_tray(app: &AppHandle, snapshot: &windows::Snapshot) {
@@ -104,21 +117,25 @@ mod app {
         };
     }
 
-    /// Complete scan: Shell information, local volumes, storage policy and startup state.
-    /// The guard prevents two commands / the background worker from scanning concurrently.
-    fn refresh_full(app: &AppHandle) -> windows::Snapshot {
+    fn set_tray_error(app: &AppHandle, error: &str) {
+        // No extra application windows: failures are visible through the tray tooltip.
+        let message = format!("TrayBin · Ошибка очистки: {}", error);
+        if let Some(tray) = app.tray_by_id("main") {
+            if tray.set_tooltip(Some(message.as_str())).is_ok() {
+                if let Ok(mut last) = app.state::<Cache>().tooltip.lock() { *last = Some(message); }
+            }
+        }
+    }
+
+    fn refresh_full(app: &AppHandle) {
         let cache = app.state::<Cache>();
         let _scan = cache.refresh_guard.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = windows::snapshot(EMPTYING.load(Ordering::Acquire));
-        if let Ok(mut last) = cache.snapshot.lock() { *last = Some(snapshot.clone()); }
+        if let Ok(mut last) = cache.counters.lock() { *last = Some(Counters::from(&snapshot)); }
         if let Ok(mut last) = cache.last_full.lock() { *last = Some(Instant::now()); }
         update_tray(app, &snapshot);
-        let _ = app.emit("traybin://snapshot", snapshot.clone());
-        snapshot
     }
 
-    /// Normal polling performs one lightweight global Shell query. A full scan is
-    /// triggered only after a change, a query failure or once per minute.
     fn poll(app: &AppHandle) {
         let cache = app.state::<Cache>();
         if cache.shutdown.is_stopped() || EMPTYING.load(Ordering::Acquire) { return; }
@@ -126,46 +143,13 @@ mod app {
             Some(previous) => previous.elapsed() >= FULL_REFRESH_INTERVAL,
             None => true,
         }).unwrap_or(true);
-        let cached = cache.snapshot.lock().ok().and_then(|x| x.clone());
+        let cached = cache.counters.lock().ok().and_then(|x| *x);
         let changed = match (windows::quick_status(), cached) {
             (Ok((items, size)), Some(old)) => !old.available || old.items != items || old.size != size,
             (Err(_), Some(old)) => old.available,
             _ => true,
         };
         if changed || expired { refresh_full(app); }
-    }
-
-    fn publish_cached(app: &AppHandle) {
-        let snapshot = app.state::<Cache>().snapshot.lock().ok().and_then(|x| x.clone());
-        if let Some(s) = snapshot { let _ = app.emit("traybin://snapshot", s); }
-    }
-
-    fn show_panel(app: &AppHandle, px: i32, py: i32) {
-        let Some(window) = app.get_webview_window("panel") else { return; };
-        let Ok(size) = window.outer_size() else { return; };
-        let width = size.width as i32;
-        let height = size.height as i32;
-        let mut x = px - width + 24;
-        let mut y = py - height - 12;
-        if let Ok(monitors) = window.available_monitors() {
-            if let Some(monitor) = monitors.iter().find(|m| {
-                let origin = m.position(); let extent = m.size();
-                px >= origin.x && px < origin.x + extent.width as i32 &&
-                py >= origin.y && py < origin.y + extent.height as i32
-            }) {
-                let origin = monitor.position(); let extent = monitor.size();
-                let right = origin.x + extent.width as i32;
-                let bottom = origin.y + extent.height as i32;
-                if y < origin.y { y = py + 16; }
-                x = x.clamp(origin.x, (right - width).max(origin.x));
-                y = y.clamp(origin.y, (bottom - height).max(origin.y));
-            }
-        }
-        let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
-        let _ = window.show();
-        let _ = window.set_focus();
-        // Never enumerate drives on the UI/event thread when opening the menu.
-        publish_cached(app);
     }
 
     struct EmptyGuard;
@@ -184,60 +168,27 @@ mod app {
         refresh_full(&app);
         result?
     }
-
-    #[tauri::command]
-    fn get_snapshot(app: AppHandle) -> windows::Snapshot {
-        let saved = app.state::<Cache>().snapshot.lock().ok().and_then(|x| x.clone());
-        saved.unwrap_or_else(|| refresh_full(&app))
+    fn start_empty(app: &AppHandle) {
+        if EMPTYING.load(Ordering::Acquire) { return; }
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = perform_empty(app.clone()).await {
+                if error != "Очистка отменена пользователем" && error != "Очистка уже выполняется" {
+                    set_tray_error(&app, &error);
+                }
+            }
+        });
     }
 
-    #[tauri::command]
-    fn open_bin() -> Result<(), String> { windows::open_recycle_bin() }
-
-    #[tauri::command]
-    fn set_startup(app: AppHandle) -> Result<bool, String> {
-        let result = windows::toggle_startup()?;
-        refresh_full(&app);
-        Ok(result)
-    }
-
-    #[tauri::command]
-    async fn empty_bin(app: AppHandle) -> Result<(), String> { perform_empty(app).await }
-
-    #[tauri::command]
-    fn hide_panel(app: AppHandle) {
-        if let Some(window) = app.get_webview_window("panel") { let _ = window.hide(); }
-    }
-
-    #[tauri::command]
-    fn show_panel_error(app: AppHandle) {
-        // The panel was hidden to let the native Windows confirmation take focus.
-        // Restore it only on unexpected failures so that the error toast is visible.
-        if let Some(window) = app.get_webview_window("panel") {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    }
-
-    #[tauri::command]
-    fn exit_app(app: AppHandle) {
-        app.state::<Cache>().shutdown.stop();
-        app.exit(0);
-    }
-
-    fn handle_tray(app: &AppHandle, event: TrayIconEvent, router: &Arc<Mutex<Router>>) {
+    fn handle_left_click(app: &AppHandle, event: TrayIconEvent, router: &Arc<Mutex<Router>>) {
         match event {
-            TrayIconEvent::Click { button: MouseButton::Right, button_state: MouseButtonState::Up, position, .. } => {
-                if let Ok(mut state) = router.lock() { state.sequence += 1; }
-                show_panel(app, position.x.round() as i32, position.y.round() as i32);
-            },
             TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } => {
                 if EMPTYING.load(Ordering::Acquire) { return; }
                 let sequence = {
-                    let Ok(mut s) = router.lock() else { return; };
-                    if s.last_double.is_some_and(|t| t.elapsed() < Duration::from_millis(650)) { return; }
-                    s.sequence += 1;
-                    s.sequence
+                    let Ok(mut state) = router.lock() else { return; };
+                    if state.last_double.is_some_and(|t| t.elapsed() < Duration::from_millis(650)) { return; }
+                    state.sequence += 1;
+                    state.sequence
                 };
                 let routing = Arc::clone(router);
                 let shutdown = Arc::clone(&app.state::<Cache>().shutdown);
@@ -256,19 +207,9 @@ mod app {
                 state.sequence += 1;
                 state.last_double = Some(Instant::now());
                 drop(state);
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = perform_empty(app.clone()).await {
-                        if error != "Очистка отменена пользователем" {
-                            if let Some(window) = app.get_webview_window("panel") {
-                                let _ = window.show(); let _ = window.set_focus();
-                            }
-                            let _ = app.emit("traybin://error", error);
-                        }
-                    }
-                });
+                start_empty(app);
             },
-            _ => {}
+            _ => {} // Right click belongs exclusively to the native context menu.
         }
     }
 
@@ -278,22 +219,32 @@ mod app {
         let cache = Cache::default();
         let shutdown = Arc::clone(&cache.shutdown);
         tauri::Builder::default()
-            // A second launch reuses the running instance and reveals its panel.
-            .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-                if let Some(panel) = app.get_webview_window("panel") {
-                    let _ = panel.show();
-                    let _ = panel.set_focus();
-                }
-            }))
+            // A second launch does not create or reveal any window.
+            .plugin(tauri_plugin_single_instance::init(|_app, _, _| {}))
             .manage(cache)
-            .invoke_handler(tauri::generate_handler![get_snapshot, open_bin, set_startup, empty_bin, hide_panel, show_panel_error, exit_app])
             .setup(move |app| {
+                let open = MenuItem::with_id(app, "tray_open", "Открыть корзину", true, None::<&str>)?;
+                let empty = MenuItem::with_id(app, "tray_empty", "Очистить корзину", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "tray_exit", "Выйти", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&open, &empty, &quit])?;
                 let icon = Image::from_bytes(ICONS[0])?;
                 TrayIconBuilder::with_id("main")
                     .icon(icon)
                     .tooltip("TrayBin · Загрузка…")
+                    .menu(&menu)
                     .show_menu_on_left_click(false)
-                    .on_tray_icon_event(move |tray, event| handle_tray(tray.app_handle(), event, &callback_router))
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "tray_open" => { let _ = windows::open_recycle_bin(); },
+                        "tray_empty" => start_empty(app),
+                        "tray_exit" => {
+                            app.state::<Cache>().shutdown.stop();
+                            app.exit(0);
+                        },
+                        _ => {},
+                    })
+                    .on_tray_icon_event(move |tray, event| {
+                        handle_left_click(tray.app_handle(), event, &callback_router)
+                    })
                     .build(app)?;
                 let app_handle = app.handle().clone();
                 refresh_full(&app_handle);
@@ -305,36 +256,35 @@ mod app {
                 })?;
                 Ok(())
             })
-            .on_window_event(|window, event| {
-                if window.label() == "panel" {
-                    match event {
-                        WindowEvent::CloseRequested { api, .. } => {
-                            api.prevent_close(); let _ = window.hide();
-                        }
-                        WindowEvent::Focused(false) => { let _ = window.hide(); }
-                        _ => {}
-                    }
-                }
-            })
             .build(tauri::generate_context!())
             .expect("TrayBin failed to initialize")
-            .run(|app_handle, event| {
-                if matches!(event, RunEvent::Exit) {
-                    app_handle.state::<Cache>().shutdown.stop();
-                }
+            .run(|app_handle, event| match event {
+                RunEvent::ExitRequested { code, api, .. } => {
+                    // Keep zero-window tray mode alive, but honor explicit "Выйти".
+                    if code.is_none() { api.prevent_exit(); }
+                },
+                RunEvent::Exit => app_handle.state::<Cache>().shutdown.stop(),
+                _ => {},
             });
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
-
         fn mock_snapshot(items: u64, size: u64, capacity: u64, complete: bool) -> windows::Snapshot {
             windows::Snapshot {
                 available: true, items, size, capacity, capacity_complete: complete,
                 volumes: vec![], startup: false, startup_status: String::new(),
                 empty_busy: false, checked_at: 0, error: None,
             }
+        }
+        #[test]
+        fn counters_keep_only_polling_fields() {
+            let snapshot = mock_snapshot(123, 4_096, 10_000, true);
+            let counters = Counters::from(&snapshot);
+            assert!(counters.available);
+            assert_eq!(counters.items, 123);
+            assert_eq!(counters.size, 4_096);
         }
         #[test]
         fn shutdown_signal_wakes_waiting_worker() {
@@ -347,7 +297,7 @@ mod app {
         }
         #[test]
         fn original_classic_icon_thresholds() {
-            if windows::two_states() { return; } // Legacy INI may explicitly request two icons.
+            if windows::two_states() { return; }
             assert_eq!(choose_icon(&mock_snapshot(0, 0, 100, true)), 0);
             assert_eq!(choose_icon(&mock_snapshot(1, 25, 100, true)), 1);
             assert_eq!(choose_icon(&mock_snapshot(1, 26, 100, true)), 2);

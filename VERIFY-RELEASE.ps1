@@ -1,4 +1,4 @@
-# TrayBin v2.0.0 Stable - Windows release verification for PowerShell 5.1+.
+# TrayBin v2.1.4 Tray-Only - Windows release verification for PowerShell 5.1+.
 # Source integrity, JavaScript tests, JSON/version validation and Windows Rust tests.
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
@@ -23,7 +23,7 @@ try {
     }
     Write-Host "Source files verified: $n" -ForegroundColor Green
 
-    Write-Host '[2/5] Checking JS and 22 regression tests...' -ForegroundColor Cyan
+    Write-Host '[2/5] Checking JS and tray-only and legacy panel tests...' -ForegroundColor Cyan
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required' }
     Invoke-Checked 'node' @('--check', '.\ui\app.js')
     Invoke-Checked 'node' @('--test', '.\tests\panel.test.cjs', '.\tests\source-contract.test.cjs')
@@ -33,19 +33,18 @@ try {
     $tauri = Get-Content '.\src-tauri\tauri.conf.json' -Raw -Encoding UTF8 | ConvertFrom-Json
     $null = Get-Content '.\src-tauri\capabilities\default.json' -Raw -Encoding UTF8 | ConvertFrom-Json
     $cargo = Get-Content '.\src-tauri\Cargo.toml' -Raw -Encoding UTF8
-    if ($npm.version -ne '2.0.0' -or $tauri.version -ne $npm.version -or $cargo -notmatch '(?m)^version\s*=\s*"2\.0\.0"') {
-        throw 'Inconsistent Stable versions in npm/Tauri/Cargo'
+    if ($npm.version -ne '2.1.4' -or $tauri.version -ne $npm.version -or $cargo -notmatch '(?m)^version\s*=\s*"2\.1\.4"') {
+        throw 'Inconsistent Preview versions in npm/Tauri/Cargo'
     }
-    if ($tauri.app.windows[0].decorations -ne $false -or $tauri.app.windows[0].shadow -ne $false) {
-        throw 'Approved borderless window configuration changed'
-    }
+    $tauriRaw = Get-Content '.\src-tauri\tauri.conf.json' -Raw -Encoding UTF8
+    if ($tauriRaw -notmatch '"windows"\s*:\s*\[\s*\]') { throw 'Tray-only mode must not create windows' }
     Write-Host '[4/5] Checking Windows Rust source...' -ForegroundColor Cyan
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw 'Cargo/Rust MSVC is required' }
     Push-Location '.\src-tauri'
     try {
-        Invoke-Checked 'cargo' @('check', '--target', 'x86_64-pc-windows-msvc')
+        Invoke-Checked 'cargo' @('check', '--offline', '--locked', '--target', 'x86_64-pc-windows-msvc')
         Write-Host '[5/5] Running Windows Rust unit tests...' -ForegroundColor Cyan
-        Invoke-Checked 'cargo' @('test', '--target', 'x86_64-pc-windows-msvc')
+        Invoke-Checked 'cargo' @('test', '--offline', '--locked', '--target', 'x86_64-pc-windows-msvc')
     } finally { Pop-Location }
     Write-Host 'TRAYBIN STABLE SOURCE AND TESTS VERIFIED.' -ForegroundColor Green
     exit 0

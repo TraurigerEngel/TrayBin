@@ -8,9 +8,9 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8');
 const ids = [
   'dot', 'checked', 'hero-title', 'count', 'count-unit', 'used', 'used-value',
-  'limit-value', 'capacity-caption', 'percent', 'fill', 'empty', 'startup-status',
+  'limit-value', 'limit-label', 'capacity-caption', 'percent', 'fill', 'empty', 'startup-status',
   'switch', 'startup', 'volumes', 'open', 'hide', 'quit', 'details', 'details-panel',
-  'details-arrow', 'toast',
+  'track', 'toast', 'home-view',
 ];
 function element() {
   const listeners = new Map();
@@ -18,15 +18,16 @@ function element() {
   const classes = new Set();
   return {
     textContent: '', className: '', style: {}, disabled: false, hidden: true,
-    children: [], attributes: attrs, classes,
+    children: [], attributes: attrs, classes, replaceCalls: 0,
     classList: {
       add(name) { classes.add(name); },
       remove(name) { classes.delete(name); },
       toggle(name, value) { if (value) classes.add(name); else classes.delete(name); },
     },
     setAttribute(k, v) { attrs.set(k, v); },
+    removeAttribute(k) { attrs.delete(k); },
     addEventListener(k, fn) { listeners.set(k, fn); },
-    replaceChildren() { this.children = []; this.textContent = ''; },
+    replaceChildren() { this.children = []; this.textContent = ''; this.replaceCalls++; },
     append(...elements) { this.children.push(...elements); },
     click() { return listeners.get('click')?.(); },
   };
@@ -63,6 +64,7 @@ function setup({ failure = {}, initial = snapshot() } = {}) {
     window: { __TAURI__: { core: { invoke }, event: { listen: async (name, fn) => { events.set(name, fn); } } } },
   };
   vm.runInNewContext(source, context, { filename: 'ui/app.js' });
+  nodes['home-view'].hidden = false;
   return { nodes, events, commands, handlers, setSnapshot: s => { current = s; } };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -75,8 +77,12 @@ test('Russian numbers, percentage, Classic status and drives are rendered', asyn
   assert.equal(nodes['count-unit'].textContent, 'объекта');
   assert.equal(nodes.percent.textContent, '20%');
   assert.equal(nodes.fill.style.width, '20%');
+  assert.equal(nodes.track.hidden, false);
+  assert.equal(nodes.track.attributes.get('aria-valuenow'), '20');
+  assert.equal(nodes.used.textContent, 'Занято 10 ГБ');
   assert.equal(nodes['used-value'].textContent, '10 ГБ');
   assert.equal(nodes['limit-value'].textContent, '50 ГБ');
+  assert.equal(nodes['limit-label'].textContent, 'Лимит Windows');
   assert.equal(nodes.volumes.children.length, 1);
   assert.equal(nodes.empty.disabled, false);
   assert.equal(nodes.startup.attributes.get('aria-pressed'), 'false');
@@ -87,6 +93,8 @@ test('Unknown capacity remains unknown; empty bin is disabled', async () => {
   assert.equal(nodes['hero-title'].textContent, 'Корзина пуста');
   assert.equal(nodes['limit-value'].textContent, 'Не определён');
   assert.equal(nodes.percent.textContent, '—');
+  assert.equal(nodes.track.hidden, true);
+  assert.equal(nodes.track.attributes.has('aria-valuenow'), false);
   assert.equal(nodes.empty.disabled, true);
 });
 test('Unavailable Shell data cannot authorize deleting', async () => {
@@ -139,8 +147,109 @@ test('Live Tauri updates and Escape close the details cleanly', async () => {
   assert.equal(nodes.startup.attributes.get('aria-pressed'), 'true');
   nodes.details.click();
   assert.equal(nodes['details-panel'].hidden, false);
+  assert.equal(nodes['home-view'].hidden, true);
+  assert.equal(nodes.details.textContent, '← Назад');
   handlers.get('keydown')({key: 'Escape'});
   assert.equal(nodes['details-panel'].hidden, true);
+  assert.equal(nodes['home-view'].hidden, false);
+  assert.equal(nodes.details.textContent, 'Подробнее');
   assert.equal(nodes.details.attributes.get('aria-expanded'), 'false');
   assert.equal(commands.at(-1), 'hide_panel');
+});
+
+
+test('Repeated snapshots do not rebuild unchanged drive details', async () => {
+  const { nodes, events } = setup();
+  await tick();
+  const old = nodes.volumes.replaceCalls;
+  events.get('traybin://snapshot')({ payload: snapshot({ items: 98 }) });
+  assert.equal(nodes.volumes.replaceCalls, old);
+  events.get('traybin://snapshot')({ payload: snapshot({ volumes: [{ name: 'D:', used: 0, limit: null, note: 'Unknown' }] }) });
+  assert.equal(nodes.volumes.replaceCalls, old + 1);
+});
+
+test('Snapshot loading failure is fail-safe, not stuck in checking state', async () => {
+  const { nodes } = setup({ failure: { get_snapshot: 'IPC failure' } });
+  await tick();
+  assert.equal(nodes['hero-title'].textContent, 'Состояние недоступно');
+  assert.equal(nodes['startup-status'].textContent, 'Недоступен');
+  assert.equal(nodes.empty.disabled, true);
+  assert.match(nodes.toast.textContent, /IPC failure/);
+});
+
+test('In-progress native empty blocks repeated destructive actions', async () => {
+  const { nodes, events } = setup();
+  await tick();
+  events.get('traybin://snapshot')({ payload: snapshot({ empty_busy: true }) });
+  assert.equal(nodes.empty.disabled, true);
+  assert.equal(nodes.empty.attributes.get('aria-busy'), 'true');
+  assert.equal(nodes['hero-title'].textContent, 'Очистка корзины…');
+});
+
+test('Details remain keyboard-accessible and can be toggled without removing content', async () => {
+  const { nodes, handlers } = setup();
+  await tick();
+  nodes.details.click();
+  assert.equal(nodes['details-panel'].hidden, false);
+  assert.equal(nodes.details.attributes.get('aria-expanded'), 'true');
+  nodes.details.click();
+  assert.equal(nodes['details-panel'].hidden, true);
+  nodes.details.click();
+  handlers.get('keydown')({ key: 'Escape' });
+  assert.equal(nodes['details-panel'].hidden, true);
+  assert.equal(nodes['home-view'].hidden, false);
+  assert.equal(nodes.details.textContent, 'Подробнее');
+  assert.equal(nodes.details.attributes.get('aria-expanded'), 'false');
+});
+
+
+test('Known disk limits remain visible when an additional disk lacks its limit', async () => {
+  const giga = 1024 ** 3;
+  const knownLimit = Math.round(14.46 * giga) + Math.round(37.18 * giga);
+  const { nodes } = setup({ initial: snapshot({
+    capacity: knownLimit, capacity_complete: false, size: 6.64 * giga,
+    volumes: [
+      { name: 'C:\\', used: 3 * 1024 ** 2, limit: Math.round(14.46 * giga), note: '' },
+      { name: 'T:\\', used: 6.64 * giga, limit: Math.round(37.18 * giga), note: '' },
+      { name: 'D:\\', used: null, limit: null, note: 'Явный лимит Windows не найден' },
+    ],
+  }) });
+  await tick();
+  assert.equal(nodes['limit-label'].textContent, 'Известный лимит');
+  assert.equal(nodes['limit-value'].textContent, '≥ 51,64 ГБ');
+  assert.equal(nodes['capacity-caption'].textContent, 'Общий лимит требует уточнения');
+  assert.equal(nodes.percent.textContent, '—');
+  assert.equal(nodes.track.hidden, true);
+  assert.equal(nodes.volumes.children.length, 3);
+});
+
+test('When full scan is incomplete without missing explicit capacities, known total is still shown', async () => {
+  const { nodes } = setup({ initial: snapshot({ capacity_complete: false }) });
+  await tick();
+  assert.equal(nodes['limit-value'].textContent, '≥ 50 ГБ');
+  assert.equal(nodes['limit-label'].textContent, 'Известный лимит');
+  assert.equal(nodes.track.hidden, true);
+});
+
+test('Missing Shell data never presents a known capacity as reliable', async () => {
+  const { nodes } = setup({ initial: snapshot({ available: false, capacity_complete: true }) });
+  await tick();
+  assert.equal(nodes['limit-value'].textContent, '—');
+  assert.equal(nodes.track.hidden, true);
+});
+
+test('Details form an exclusive view; back restores home, preserves native commands', async () => {
+  const { nodes, commands } = setup();
+  await tick();
+  nodes.details.click();
+  assert.equal(nodes['home-view'].hidden, true);
+  assert.equal(nodes['details-panel'].hidden, false);
+  assert.equal(nodes.details.textContent, '← Назад');
+  nodes.details.click();
+  assert.equal(nodes['home-view'].hidden, false);
+  assert.equal(nodes['details-panel'].hidden, true);
+  assert.equal(nodes.details.textContent, 'Подробнее');
+  nodes.open.click();
+  await tick();
+  assert.deepEqual(commands.slice(-3), ['open_bin', 'hide_panel', 'get_snapshot']);
 });

@@ -1,6 +1,2 @@
-TrayBin v2.0.0 Stable - release source approved after 9/9 RC1 Windows acceptance checks.
-All 16 RC1 Node.js tests, 3 Rust tests and optimized RC1 compilation previously passed.
-Stable modifies only version strings, documentation, packaging and verification tests.
-Windows Shell, Tauri event logic, JavaScript, HTML, CSS and 5 Classic icons are identical to approved RC1.
-Window: 376x528, borderless with shadow disabled, Inter font required.
-Next action: verify and build the final optimized Stable portable EXE/ZIP on Windows 11.
+TrayBin 2.1.4 Lean Runtime Stable
+Windows x64 Release EXE verified SHA-256: afb7939a0875162019c9de78e3fb0acd3c8b351d03d38d1912ac4cc0188f96bb
