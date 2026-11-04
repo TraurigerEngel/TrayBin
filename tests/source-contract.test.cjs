@@ -17,16 +17,16 @@ const iconHashes = {
   'full.ico': '02718e2572407bcdf90ceec31abd8a5cd1eff00ab6852b0d4b24dfb76609e29a',
 };
 
-test('Version 2.1.4 is aligned across npm, Cargo, Cargo.lock and Tauri', () => {
+test('Version 2.1.5 is aligned across npm, Cargo, Cargo.lock and Tauri', () => {
   const pkg = JSON.parse(read('package.json'));
   const lock = JSON.parse(read('package-lock.json'));
   const conf = JSON.parse(read('src-tauri/tauri.conf.json'));
-  assert.equal(pkg.version, '2.1.4');
+  assert.equal(pkg.version, '2.1.5');
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
   assert.equal(conf.version, pkg.version);
-  assert.match(read('src-tauri/Cargo.toml'), /^version\s*=\s*"2\.1\.4"/m);
-  assert.match(read('src-tauri/Cargo.lock'), /\[\[package\]\]\r?\nname = "traybin"\r?\nversion = "2\.1\.4"/);
+  assert.match(read('src-tauri/Cargo.toml'), /^version\s*=\s*"2\.1\.5"/m);
+  assert.match(read('src-tauri/Cargo.lock'), /\[\[package\]\]\r?\nname = "traybin"\r?\nversion = "2\.1\.5"/);
 });
 test('Tauri launches with no WebView windows at all', () => {
   const conf = JSON.parse(read('src-tauri/tauri.conf.json'));
@@ -38,19 +38,36 @@ test('Tauri launches with no WebView windows at all', () => {
   assert.match(core(), /if code\.is_none\(\) \{ api\.prevent_exit\(\); \}/);
   assert.match(core(), /api\.prevent_exit\(\)/);
 });
-test('Native right-click menu contains precisely three named commands in order', () => {
+test('Native right-click menu contains three original commands plus native autostart toggle', () => {
   const c = core();
   const items = [...c.matchAll(/MenuItem::with_id\(app, "([^"]+)", "([^"]+)"/g)].map(x=>[x[1],x[2]]);
   assert.deepEqual(items, [
     ['tray_open','Открыть корзину'],
     ['tray_empty','Очистить корзину'],
+    ['tray_startup','Автозапуск'],
     ['tray_exit','Выйти'],
   ]);
-  assert.match(c, /Menu::with_items\(app, &\[&open, &empty, &quit\]\)/);
+  assert.match(c, /CheckMenuItem::with_id\(app, "tray_startup", "Автозапуск", true,/);
+  assert.match(c, /Menu::with_items\(app, &\[&open, &empty, &startup, &quit\]\)/);
   assert.match(c, /\.menu\(&menu\)/);
   assert.match(c, /\.show_menu_on_left_click\(false\)/);
   assert.match(c, /\.on_menu_event\(/);
   assert.doesNotMatch(c, /MouseButton::Right/);
+});
+test('Autostart checkbox uses the existing registry helper and always resynchronizes', () => {
+  const c = core();
+  const w = read('src-tauri/src/windows.rs');
+  assert.match(c, /windows::startup_enabled\(\), None::<&str>\)\?/);
+  assert.match(c, /"tray_startup"\s*=>\s*\{/);
+  assert.match(c, /let outcome = windows::toggle_startup\(\)/);
+  assert.match(c, /let actual = windows::startup_enabled\(\)/);
+  assert.match(c, /startup_item\.set_checked\(actual\)/);
+  assert.match(c, /set_tray_error\(app, "автозапуска", &error\)/);
+  assert.match(w, /pub fn startup_enabled\(\) -> bool \{ startup_state\(\)\.0 \}/);
+  assert.match(w, /pub fn toggle_startup\(\) -> Result<bool, String>/);
+  assert.match(w, /const RUN: &str = r"Software\\Microsoft\\Windows\\CurrentVersion\\Run"/);
+  assert.match(w, /const APPROVED: &str = /);
+  assert.doesNotMatch(c, /get_webview_window|show_panel\(/);
 });
 test('Menu actions use existing Windows Shell functionality and real app exit', () => {
   const c = core();
@@ -112,7 +129,7 @@ test('Only project tests are selected; no dependency reinstall in build script',
 });
 test('Versioned source archive recipe is retained and hashes sources', () => {
   const make = read('CREATE-SOURCE-ARCHIVE.ps1');
-  assert.match(make, /TrayBin_v2\.1\.4_Tray_Only_Source\.zip/);
+  assert.match(make, /TrayBin_v2\.1\.5_Autostart_Menu_Source\.zip/);
   assert.match(make, /FILE_MANIFEST_SHA256\.txt/);
   assert.match(make, /SOURCE_ARCHIVE_SHA256\.txt/);
   assert.match(make, /scripts\\VERIFY-NPM-LOCK\.cjs/);
@@ -121,9 +138,9 @@ test('Standalone npm lock validator accepts exact version and rejects mutation',
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'traybin-lock-'));
   const file = path.join(tmp, 'package-lock.json');
   const verifier = path.join(root, 'scripts', 'VERIFY-NPM-LOCK.cjs');
-  const run = () => spawnSync(process.execPath, [verifier, file, '2.1.4', 'traybin-tauri'], {encoding: 'utf8'});
+  const run = () => spawnSync(process.execPath, [verifier, file, '2.1.5', 'traybin-tauri'], {encoding: 'utf8'});
   try {
-    const obj = {name:'traybin-tauri',version:'2.1.4',lockfileVersion:3,packages:{'':{name:'traybin-tauri',version:'2.1.4'}}};
+    const obj = {name:'traybin-tauri',version:'2.1.5',lockfileVersion:3,packages:{'':{name:'traybin-tauri',version:'2.1.5'}}};
     fs.writeFileSync(file, JSON.stringify(obj));
     assert.equal(run().status, 0);
     obj.packages[''].version = '2.1.2';
@@ -131,13 +148,23 @@ test('Standalone npm lock validator accepts exact version and rejects mutation',
     assert.notEqual(run().status, 0);
   } finally { fs.rmSync(tmp, {recursive:true,force:true}); }
 });
-test('Offline release checks and source packager target 2.1.4 only', () => {
+test('Offline release checks and source packager target 2.1.5 only', () => {
   const verify = read('VERIFY-RELEASE.ps1');
   const pack = read('CREATE-SOURCE-ARCHIVE.ps1');
-  assert.ok(verify.includes('2\.1\.4'));
-  assert.ok(pack.includes('2\.1\.4'));
+  assert.ok(verify.includes('2\.1\.5'));
+  assert.ok(pack.includes('2\.1\.5'));
   assert.doesNotMatch(verify, /2\\\.1\\\.2/);
   assert.doesNotMatch(pack, /2\\\.1\\\.2/);
   assert.match(verify, /'--offline', '--locked'/);
   assert.match(verify, /"windows"\\s\*:\\s\*\\\[\\s\*\\\]/);
+});
+
+test('Clean source restoration includes first-build setup and correct Cargo version in packager', () => {
+  const setup = read('FIRST-BUILD.ps1');
+  assert.match(setup, /npm\.cmd ci/);
+  assert.match(setup, /cargo fetch --locked --target x86_64-pc-windows-msvc/);
+  assert.match(setup, /BUILD-RELEASE\.ps1/);
+  const pack = read('CREATE-SOURCE-ARCHIVE.ps1');
+  assert.match(pack, /2\\\.1\\\.5/); // literal regex-version in PowerShell
+  assert.doesNotMatch(pack, /2\\\.1\\\.3/);
 });

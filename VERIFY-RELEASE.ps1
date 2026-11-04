@@ -1,4 +1,4 @@
-# TrayBin v2.1.4 Tray-Only - Windows release verification for PowerShell 5.1+.
+# TrayBin v2.1.5 Autostart Menu - Windows release verification for PowerShell 5.1+.
 # Source integrity, JavaScript tests, JSON/version validation and Windows Rust tests.
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
@@ -33,7 +33,7 @@ try {
     $tauri = Get-Content '.\src-tauri\tauri.conf.json' -Raw -Encoding UTF8 | ConvertFrom-Json
     $null = Get-Content '.\src-tauri\capabilities\default.json' -Raw -Encoding UTF8 | ConvertFrom-Json
     $cargo = Get-Content '.\src-tauri\Cargo.toml' -Raw -Encoding UTF8
-    if ($npm.version -ne '2.1.4' -or $tauri.version -ne $npm.version -or $cargo -notmatch '(?m)^version\s*=\s*"2\.1\.4"') {
+    if ($npm.version -ne '2.1.5' -or $tauri.version -ne $npm.version -or $cargo -notmatch '(?m)^version\s*=\s*"2\.1\.5"') {
         throw 'Inconsistent Preview versions in npm/Tauri/Cargo'
     }
     $tauriRaw = Get-Content '.\src-tauri\tauri.conf.json' -Raw -Encoding UTF8

@@ -173,6 +173,9 @@ fn startup_state() -> (bool, String) {
     }
     (true, "Включён".into())
 }
+/// Current EXE path registered for auto-start and not disabled in StartupApproved.
+pub fn startup_enabled() -> bool { startup_state().0 }
+
 pub fn toggle_startup() -> Result<bool, String> {
     let enabled = startup_state().0;
     let path = env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().into_owned();

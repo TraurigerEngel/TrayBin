@@ -1,4 +1,4 @@
-# TrayBin v2.1.4 Tray-Only - complete rebuildable source archive.
+# TrayBin v2.1.5 Autostart Menu - complete rebuildable source archive.
 # PowerShell 5.1+, no additional modules. Includes generated dependency locks.
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
@@ -15,12 +15,12 @@ $stageRoot = $null
 $checkRoot = $null
 try {
     $project = $PSScriptRoot
-    $out = Join-Path $project 'Artifacts\TrayBin_v2.1.4_Tray_Only'
+    $out = Join-Path $project 'Artifacts\TrayBin_v2.1.5_Autostart_Menu'
     New-Item -Path $out -ItemType Directory -Force | Out-Null
-    $zip = Join-Path $out 'TrayBin_v2.1.4_Tray_Only_Source.zip'
+    $zip = Join-Path $out 'TrayBin_v2.1.5_Autostart_Menu_Source.zip'
     $stamp = [guid]::NewGuid().ToString('N')
     $stageRoot = Join-Path $out ('.source-pack-' + $stamp)
-    $sourceName = 'TrayBin_v2.1.4_Tray_Only_Source'
+    $sourceName = 'TrayBin_v2.1.5_Autostart_Menu_Source'
     $stage = Join-Path $stageRoot $sourceName
     $checkRoot = Join-Path $out ('.source-verify-' + $stamp)
     New-Item -Path $stage -ItemType Directory -Force | Out-Null
@@ -51,7 +51,7 @@ try {
     }
     $pkg = Get-Content -LiteralPath $pkgFile -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required to validate npm dependency lockfile' }
-    if ($pkg.version -ne '2.1.4') { throw 'Preview package version differs from 2.1.4' }
+    if ($pkg.version -ne '2.1.5') { throw 'Preview package version differs from 2.1.5' }
     # Avoid node -e here: Windows PowerShell 5.1 removes nested JavaScript quotation marks.
     # Pass the JS validator path and data as separate command-line arguments.
     $lockValidator = Join-Path $project 'scripts\VERIFY-NPM-LOCK.cjs'
@@ -59,8 +59,8 @@ try {
     & node $lockValidator $pkgLockFile $pkg.version $pkg.name
     if ($LASTEXITCODE -ne 0) { throw 'package-lock.json validation failed; check npm lockfile before rebuilding' }
     $cargoLockText = Get-Content -LiteralPath $cargoLockFile -Raw -Encoding UTF8
-    if ($cargoLockText -notmatch '(?ms)^\[\[package\]\]\s*\r?\nname\s*=\s*"traybin"\s*\r?\nversion\s*=\s*"2\.1\.4"') {
-        throw 'Cargo.lock does not match traybin 2.1.4; run the Rust release build'
+    if ($cargoLockText -notmatch '(?ms)^\[\[package\]\]\s*\r?\nname\s*=\s*"traybin"\s*\r?\nversion\s*=\s*"2\.1\.5"') {
+        throw 'Cargo.lock does not match traybin 2.1.5; run the Rust release build'
     }
     $expected['package-lock.json'] = Get-Sha $pkgLockFile
     $expected['src-tauri/Cargo.lock'] = Get-Sha $cargoLockFile

@@ -1,2 +1,2 @@
-TrayBin 2.1.4 Lean Runtime Stable
-Windows x64 Release EXE verified SHA-256: afb7939a0875162019c9de78e3fb0acd3c8b351d03d38d1912ac4cc0188f96bb
+TrayBin 2.1.5 Autostart Menu Stable
+Windows x64 Release EXE verified SHA-256: d7f9aa17628db4638b9fbf9bbcf1bb25f18e5fca219743f86ba33547243ffc08

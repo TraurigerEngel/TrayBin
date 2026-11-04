@@ -1,4 +1,4 @@
-//! TrayBin v2.1.4 Lean Runtime Preview — Windows-native context menu, no WebView windows.
+//! TrayBin v2.1.5 Autostart Menu Preview — Windows-native context menu, no WebView windows.
 #![cfg_attr(not(windows), allow(unused))]
 #[cfg(not(windows))]
 compile_error!("TrayBin uses Windows Shell APIs and must be built on Windows.");
@@ -17,7 +17,7 @@ mod app {
     use tauri::{
         AppHandle, Manager, RunEvent,
         image::Image,
-        menu::{Menu, MenuItem},
+        menu::{CheckMenuItem, Menu, MenuItem},
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     };
 
@@ -117,9 +117,9 @@ mod app {
         };
     }
 
-    fn set_tray_error(app: &AppHandle, error: &str) {
+    fn set_tray_error(app: &AppHandle, operation: &str, error: &str) {
         // No extra application windows: failures are visible through the tray tooltip.
-        let message = format!("TrayBin · Ошибка очистки: {}", error);
+        let message = format!("TrayBin · Ошибка {}: {}", operation, error);
         if let Some(tray) = app.tray_by_id("main") {
             if tray.set_tooltip(Some(message.as_str())).is_ok() {
                 if let Ok(mut last) = app.state::<Cache>().tooltip.lock() { *last = Some(message); }
@@ -174,7 +174,7 @@ mod app {
         tauri::async_runtime::spawn(async move {
             if let Err(error) = perform_empty(app.clone()).await {
                 if error != "Очистка отменена пользователем" && error != "Очистка уже выполняется" {
-                    set_tray_error(&app, &error);
+                    set_tray_error(&app, "очистки", &error);
                 }
             }
         });
@@ -225,17 +225,32 @@ mod app {
             .setup(move |app| {
                 let open = MenuItem::with_id(app, "tray_open", "Открыть корзину", true, None::<&str>)?;
                 let empty = MenuItem::with_id(app, "tray_empty", "Очистить корзину", true, None::<&str>)?;
+                let startup = CheckMenuItem::with_id(app, "tray_startup", "Автозапуск", true,
+                    windows::startup_enabled(), None::<&str>)?;
                 let quit = MenuItem::with_id(app, "tray_exit", "Выйти", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&open, &empty, &quit])?;
+                let menu = Menu::with_items(app, &[&open, &empty, &startup, &quit])?;
+                let startup_item = startup.clone();
                 let icon = Image::from_bytes(ICONS[0])?;
                 TrayIconBuilder::with_id("main")
                     .icon(icon)
                     .tooltip("TrayBin · Загрузка…")
                     .menu(&menu)
                     .show_menu_on_left_click(false)
-                    .on_menu_event(|app, event| match event.id.as_ref() {
+                    .on_menu_event(move |app, event| match event.id.as_ref() {
                         "tray_open" => { let _ = windows::open_recycle_bin(); },
                         "tray_empty" => start_empty(app),
+                        "tray_startup" => {
+                            // The native check item toggles before this callback.
+                            // Restore its state from the real Windows registry after every attempt.
+                            let outcome = windows::toggle_startup();
+                            let actual = windows::startup_enabled();
+                            if let Err(error) = startup_item.set_checked(actual) {
+                                set_tray_error(app, "обновления галочки", &error.to_string());
+                            }
+                            if let Err(error) = outcome {
+                                set_tray_error(app, "автозапуска", &error);
+                            }
+                        },
                         "tray_exit" => {
                             app.state::<Cache>().shutdown.stop();
                             app.exit(0);

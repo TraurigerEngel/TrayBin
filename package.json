@@ -1,7 +1,7 @@
 {
   "name": "traybin-tauri",
   "private": true,
-  "version": "2.1.4",
+  "version": "2.1.5",
   "description": "TrayBin v2.1 Minimal Details Fix - compact Windows recycle bin companion",
   "scripts": {
     "dev": "tauri dev",
